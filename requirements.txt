@@ -1,3 +1,5 @@
 jsonschema
+freetype-py
+uharfbuzz
 git+https://github.com/wavenumber-eng/altium_monkey.git
 git+https://github.com/openscopeproject/interactivehtmlbom.git

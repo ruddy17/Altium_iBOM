@@ -1,0 +1,11 @@
+[Design]
+Version=1.0
+
+[Document1]
+DocumentPath=Altium_iBOM.pas
+AnnotationEnabled=0
+AnnotateStartValue=1
+AnnotationIndexControlEnabled=0
+AnnotateSuffix=
+AnnotateScope=All
+AnnotateOrder=-1

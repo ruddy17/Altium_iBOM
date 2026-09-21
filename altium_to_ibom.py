@@ -848,13 +848,23 @@ def add_outline_edges_from_board(pcbdoc: object, ox: float, oy: float, edges: li
     return outline_points
 
 
+def load_design(source: Path) -> AltiumDesign:
+    suffix = source.suffix.lower()
+    if suffix == ".prjpcb":
+        return AltiumDesign.from_prjpcb(source)
+    if suffix == ".pcbdoc":
+        return AltiumDesign.from_pcbdoc(source)
+    raise ValueError(f"Unsupported Altium input: {source}. Expected a .PrjPcb or .PcbDoc file.")
+
+
 def build_payload(project: Path) -> dict[str, object]:
-    design = AltiumDesign.from_prjpcb(project)
+    design = load_design(project)
     pcbdoc = design.load_pcbdoc()
     stack = resolved_layer_stack_from_pcbdoc(pcbdoc)
     ox = float(pcbdoc.board.origin_x if pcbdoc.board else 0.0)
     oy = float(pcbdoc.board.origin_y if pcbdoc.board else 0.0)
-    bom_by_ref = {row["designator"]: row for row in design.to_bom()}
+    bom_rows = design.to_bom() if design.schdocs else []
+    bom_by_ref = {row["designator"]: row for row in bom_rows}
 
     drawings, edges = collect_layer_drawings(pcbdoc, stack, bom_by_ref, ox, oy)
     outline_points = add_outline_edges_from_board(pcbdoc, ox, oy, edges)
@@ -991,7 +1001,7 @@ def generate_html(json_path: Path, dest_dir: Path, name_format: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert an Altium .PrjPcb/.PcbDoc project to InteractiveHtmlBom generic JSON.")
-    parser.add_argument("project", type=Path, help="Path to .PrjPcb or project accepted by altium_monkey")
+    parser.add_argument("project", type=Path, help="Path to an Altium .PrjPcb or .PcbDoc file")
     parser.add_argument("-o", "--output", type=Path, help="Output generic iBOM JSON path")
     parser.add_argument("--html", action="store_true", help="Also generate an InteractiveHtmlBom HTML file")
     parser.add_argument("--html-name", help="HTML output name-format without extension")

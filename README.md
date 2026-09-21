@@ -17,6 +17,7 @@ Altium GUI command that runs the converter from inside Altium Designer.
 ```text
 Altium_iBOM/
   altium_to_ibom.py   Main converter CLI
+  altium-plugin/      One-button Altium DelphiScript integration
   requirements.txt    Python dependencies
   README.md           Project notes and handoff
 ```
@@ -77,8 +78,10 @@ Example:
 
 ## Input Files
 
-The intended input is an Altium `*.PrjPcb` project. Through the project,
+The preferred input is an Altium `*.PrjPcb` project. Through the project,
 `altium_monkey` loads the referenced `*.PcbDoc` and schematic/project metadata.
+The converter also accepts a standalone `*.PcbDoc`; its board geometry and PCB
+components are available, but schematic-only BOM fields are naturally absent.
 
 The PCB document contains the geometry needed for the board view:
 
@@ -89,10 +92,42 @@ The PCB document contains the geometry needed for the board view:
 - silkscreen, mechanical, and assembly primitives
 - PCB text and component text
 
-In principle, `altium_monkey` can load a standalone `*.PcbDoc` without a
-`*.PrjPcb`, but the current converter still calls `AltiumDesign.from_prjpcb()`.
-Supporting direct `*.PcbDoc` input should be a small dispatch change in
-`build_payload()`.
+## Altium One-Button Integration
+
+The `altium-plugin` directory contains a DelphiScript Global Project. It detects
+the focused PCB project or document, runs the Python converter, writes the
+result to an `ibom` directory beside the source, and opens the generated HTML.
+
+Run the installer once from PowerShell:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\altium-plugin\install.ps1
+```
+
+The installer creates the Altium-side launcher inside the visible repository:
+
+```text
+<repository>\altium-plugin\installed\Altium_iBOM.PrjScr
+```
+
+It records the current converter and Python paths in a local `config.cmd`. If
+the repository or virtual environment is moved, rerun the installer.
+
+In Altium Designer:
+
+1. Open **Preferences > Scripting System > Global Projects**.
+2. Add `altium-plugin\installed\Altium_iBOM.PrjScr` from this repository.
+3. Use **File > Run Script** once and run
+   `Altium_iBOM.pas > GenerateInteractiveBom` to verify it.
+4. Open the PCB editor's **Customize** dialog, create a command using process
+   `ScriptingSystem:RunScript`, and use the script parameters copied from the
+   Run Script dialog.
+5. Drag that command onto a PCB toolbar.
+
+The command prefers the focused `*.PrjPcb` because that supplies schematic BOM
+metadata. If there is no PCB project, it falls back to the active `*.PcbDoc`.
+No Altium project needs to be created solely for iBOM generation.
 
 ## Output Files
 
@@ -126,7 +161,8 @@ Implemented and tested on the demo board:
 - BOM component metadata and extra fields
 - component pads, including pin-1 markers
 - SMD rectangular, rounded-rectangle, oval, circular, and custom-ish pad shapes
-- free through-hole pads emitted as via-style board features
+- free pads and vias rendered through a hidden virtual footprint, without BOM
+  rows or click-selection interference
 - copper tracks, arcs, vias, and zones
 - board outline segments and rounded arc corners
 - full-circle drawing arcs emitted as circles
@@ -157,35 +193,12 @@ These were real visual/click bugs found during development:
   designator helper layer should remain visible.
 - Component highlight boxes should not be based only on pad centers.
 
-## Altium GUI Integration Plan
+## Current Altium UX
 
-The recommended plugin path is a DelphiScript front end plus the existing Python
-converter as the engine.
-
-Proposed future layout:
-
-```text
-Altium_iBOM/
-  altium_to_ibom.py
-  requirements.txt
-  altium-plugin/
-    Altium_iBOM.PrjScr
-    Altium_iBOM.pas
-    Altium_iBOM.dfm
-    Altium_iBOM.ini.example
-```
-
-The script UI should:
-
-- detect the current focused project or PCB document
-- let the user choose output directory and HTML options
-- store settings in an INI file
-- call Python as an external process
-- show success/failure and a log path
-- optionally open the generated HTML
-
-Keep Python headless. Avoid a separate Python GUI unless the Altium script UI is
-too limited.
+The first integration deliberately has no settings dialog. One command produces
+JSON and HTML in `<design directory>\ibom` and opens the HTML. Conversion errors
+show a message with the log path. A native DelphiScript settings form can be
+added later without changing the Python engine.
 
 ## Handoff Notes For Future Agents
 
@@ -204,9 +217,8 @@ they exercise rounded rectangles and true oval pads differently.
 When touching text, check both regular component overlay text and helper-layer
 top designators. They intentionally have different visibility behavior.
 
-When adding standalone `*.PcbDoc` support, use
-`AltiumDesign.from_pcbdoc(path)` for `.PcbDoc` and keep `from_prjpcb(path)` for
-`.PrjPcb`.
+Standalone `*.PcbDoc` input uses `AltiumDesign.from_pcbdoc(path)`; project input
+uses `AltiumDesign.from_prjpcb(path)`.
 
 This is still prototype-grade. The demo board is a good regression target, but
 more Altium projects are needed before claiming broad compatibility.

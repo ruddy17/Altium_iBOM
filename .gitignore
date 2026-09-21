@@ -4,3 +4,4 @@ __pycache__/
 *.ibom-input.json
 *.ibom.html
 *.html
+altium-plugin/installed/

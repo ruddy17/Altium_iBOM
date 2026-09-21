@@ -412,50 +412,36 @@ def make_arc_drawing(arc: object, ox: float, oy: float) -> dict[str, object]:
     }
 
 
-def make_via(pcbdoc: object, via: object, ox: float, oy: float) -> dict[str, object]:
+def make_via_pad(pcbdoc: object, via: object, ox: float, oy: float) -> dict[str, object]:
     width = float(getattr(via, "diameter", 0) or getattr(via, "width", 0) or 0) / 10000.0
     drill = float(getattr(via, "hole_size", 0) or 0) / 10000.0
-    pos = point_iu(via.x, via.y, ox, oy)
     result: dict[str, object] = {
-        "start": pos,
-        "end": pos,
-        "width": round(width or drill, 6),
+        "layers": ["F", "B"],
+        "pos": point_iu(via.x, via.y, ox, oy),
+        "size": [round(width or drill, 6), round(width or drill, 6)],
+        "angle": 0,
+        "shape": "circle",
+        "type": "th",
     }
     if drill:
-        result["drillsize"] = round(drill, 6)
+        result["drillshape"] = "circle"
+        result["drillsize"] = [round(drill, 6), 0]
     name = net_name(pcbdoc, getattr(via, "net_index", None))
     if name:
         result["net"] = name
     return result
 
 
-def make_free_th_pad_track(pcbdoc: object, pad: object, ox: float, oy: float) -> dict[str, object]:
-    pos = point_iu(pad.x, pad.y, ox, oy)
-    width = max(pad_width(pad), pad_height(pad))
-    drill = float(getattr(pad, "hole_size", 0) or 0) / 10000.0
-    result: dict[str, object] = {
-        "start": pos,
-        "end": pos,
-        "width": round(width, 6),
-        "drillsize": round(drill, 6),
-    }
-    name = net_name(pcbdoc, getattr(pad, "net_index", None))
-    if name:
-        result["net"] = name
-    return result
-
-
-def free_th_pad_tracks(pcbdoc: object, ox: float, oy: float) -> list[dict[str, object]]:
-    tracks = []
+def board_primitive_pads(pcbdoc: object, ox: float, oy: float) -> list[dict[str, object]]:
+    pads = []
     for pad in pcbdoc.pads:
         if getattr(pad, "component_index", None) is not None:
             continue
-        if int(getattr(pad, "hole_size", 0) or 0) <= 0:
-            continue
-        if pad_shape(pad) != "circle":
-            continue
-        tracks.append(make_free_th_pad_track(pcbdoc, pad, ox, oy))
-    return tracks
+        converted = make_pad(pcbdoc, pad, ox, oy)
+        converted.pop("pin1", None)
+        pads.append(converted)
+    pads.extend(make_via_pad(pcbdoc, via, ox, oy) for via in pcbdoc.vias)
+    return pads
 
 
 def make_fill_drawing(fill: object, ox: float, oy: float) -> dict[str, object]:
@@ -645,6 +631,14 @@ def collect_layer_drawings(
         bucket = drawing_bucket(stack, getattr(fill, "layer", None))
         if bucket:
             drawings[bucket[0]][bucket[1]].append(make_fill_drawing(fill, ox, oy))
+    for region in pcbdoc.regions:
+        layer = getattr(region, "layer", None)
+        if is_edge_layer(stack, layer):
+            continue
+        bucket = drawing_bucket(stack, layer)
+        drawing = make_region_drawing(region, ox, oy)
+        if bucket and drawing:
+            drawings[bucket[0]][bucket[1]].append(drawing)
     for text in pcbdoc.texts:
         layer = getattr(text, "layer", None)
         bucket = drawing_bucket(stack, layer)
@@ -914,6 +908,31 @@ def build_payload(project: Path) -> dict[str, object]:
             }
         )
 
+    free_pads = board_primitive_pads(pcbdoc, ox, oy)
+    if free_pads:
+        # iBOM renders pads only as part of a footprint. A virtual component keeps
+        # board-level pads and vias visible without adding a row to the BOM.
+        footprints.append(
+            {
+                "ref": "__BOARD_PRIMITIVES__",
+                "center": [0, 0],
+                "bbox": {"pos": [1_000_000_000, 1_000_000_000], "relpos": [0, 0], "size": [1, 1], "angle": 0},
+                "pads": free_pads,
+                "drawings": [],
+                "layer": "F",
+            }
+        )
+        components.append(
+            {
+                "ref": "__BOARD_PRIMITIVES__",
+                "val": "",
+                "footprint": "",
+                "layer": "F",
+                "attr": "Virtual",
+                "extra_fields": {},
+            }
+        )
+
     tracks = {"F": [], "B": []}
     for track in pcbdoc.tracks:
         side = layer_side(getattr(track, "layer", None))
@@ -923,13 +942,6 @@ def build_payload(project: Path) -> dict[str, object]:
         side = layer_side(getattr(arc, "layer", None))
         if side in tracks and net_name(pcbdoc, getattr(arc, "net_index", None)):
             tracks[side].append(make_arc(pcbdoc, arc, ox, oy))
-    for via in pcbdoc.vias:
-        item = make_via(pcbdoc, via, ox, oy)
-        tracks["F"].append(item)
-        tracks["B"].append(item)
-    for item in free_th_pad_tracks(pcbdoc, ox, oy):
-        tracks["F"].append(item)
-        tracks["B"].append(item)
 
     minx, miny, maxx, maxy = (
         (min(x for x, _ in outline_points), min(y for _, y in outline_points), max(x for x, _ in outline_points), max(y for _, y in outline_points))
